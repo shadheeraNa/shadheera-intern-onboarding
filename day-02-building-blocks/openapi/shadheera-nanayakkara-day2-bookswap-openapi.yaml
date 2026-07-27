@@ -1,0 +1,1474 @@
+openapi: 3.1.0
+jsonSchemaDialect: https://json-schema.org/draft/2020-12/schema
+
+info:
+  title: BookSwap API
+  version: 0.1.0
+  description: |
+    REST API for members of a Colombo apartment building to list, discover,
+    borrow, and track community books. Microsoft Entra External ID authenticates
+    members, and every operation is scoped to the authenticated member's building.
+
+servers:
+  - url: https://api.bookswap.local
+    description: BookSwap API base URL
+
+tags:
+  - name: Books
+    description: Book catalogue, listing, and photo operations.
+  - name: Borrow Requests
+    description: Operations for requesting, viewing, accepting, and declining borrow requests.
+  - name: Loans
+    description: Operations for active, returned, overdue, and historical loans.
+  - name: Notifications
+    description: In-app notification operations for the authenticated member.
+
+security:
+  - bearerAuth: []
+
+paths:
+  /books:
+    get:
+      tags:
+        - Books
+      summary: List books in the building
+      description: >
+        Returns a paginated list of books in the authenticated member's building,
+        ordered from newest to oldest. Results can be searched by title, author,
+        or ISBN and filtered by condition and availability.
+      operationId: listBooks
+      parameters:
+        - name: search
+          in: query
+          required: false
+          description: Search text matched against the title, author, or ISBN.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+          example: hobbit
+        - name: condition
+          in: query
+          required: false
+          description: Filter books by physical condition.
+          schema:
+            $ref: "#/components/schemas/BookCondition"
+        - name: available
+          in: query
+          required: false
+          description: Filter books by current availability.
+          schema:
+            type: boolean
+          example: true
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: A paginated list of books was returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookPage"
+              example:
+                items:
+                  - id: 4d2b878b-7a1d-4570-b5d2-68ebdb347a55
+                    ownerId: 0fcf0a60-6320-44c7-b0d7-95557a82d46f
+                    title: The Hobbit
+                    author: J. R. R. Tolkien
+                    isbn: "9780547928227"
+                    condition: GOOD
+                    photoUrl: https://storage.example.com/books/4d2b878b.jpg
+                    available: true
+                    createdAt: "2026-07-19T08:30:00Z"
+                    updatedAt: "2026-07-19T08:30:00Z"
+                page: 1
+                pageSize: 20
+                total: 1
+                totalPages: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    post:
+      tags:
+        - Books
+      summary: List a new book
+      description: >
+        Creates a book listing in the authenticated member's building. The owner
+        and building are determined from the authenticated member rather than
+        supplied in the request body. Email availability does not block creation.
+      operationId: createBook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBookRequest"
+            example:
+              title: The Hobbit
+              author: J. R. R. Tolkien
+              isbn: "9780547928227"
+              condition: GOOD
+              available: true
+      responses:
+        "201":
+          description: Book listing created successfully.
+          headers:
+            Location:
+              description: URL of the newly created book.
+              schema:
+                type: string
+                format: uri
+              example: https://api.bookswap.local/books/4d2b878b-7a1d-4570-b5d2-68ebdb347a55
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Book"
+              example:
+                id: 4d2b878b-7a1d-4570-b5d2-68ebdb347a55
+                ownerId: 0fcf0a60-6320-44c7-b0d7-95557a82d46f
+                title: The Hobbit
+                author: J. R. R. Tolkien
+                isbn: "9780547928227"
+                condition: GOOD
+                photoUrl: null
+                available: true
+                createdAt: "2026-07-19T08:30:00Z"
+                updatedAt: "2026-07-19T08:30:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /books/{bookId}:
+    parameters:
+      - $ref: "#/components/parameters/BookId"
+    get:
+      tags:
+        - Books
+      summary: Get a book by ID
+      description: Returns the details of a single book in the authenticated member's building.
+      operationId: getBookById
+      responses:
+        "200":
+          description: Book returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Book"
+              example:
+                id: 4d2b878b-7a1d-4570-b5d2-68ebdb347a55
+                ownerId: 0fcf0a60-6320-44c7-b0d7-95557a82d46f
+                title: The Hobbit
+                author: J. R. R. Tolkien
+                isbn: "9780547928227"
+                condition: GOOD
+                photoUrl: https://storage.example.com/books/4d2b878b.jpg
+                available: true
+                createdAt: "2026-07-19T08:30:00Z"
+                updatedAt: "2026-07-19T08:30:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    patch:
+      tags:
+        - Books
+      summary: Update a book listing
+      description: >
+        Partially updates a book owned by the authenticated member. Only fields
+        included in the request body are changed. A book with an active loan
+        cannot be manually marked as available.
+      operationId: updateBook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBookRequest"
+            examples:
+              updateCondition:
+                summary: Update the book condition
+                value:
+                  condition: FAIR
+              makeUnavailable:
+                summary: Temporarily make the book unavailable
+                value:
+                  available: false
+              updateDetails:
+                summary: Update several listing details
+                value:
+                  title: The Hobbit
+                  author: J. R. R. Tolkien
+                  isbn: "9780547928227"
+                  condition: GOOD
+      responses:
+        "200":
+          description: Book listing updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Book"
+              example:
+                id: 4d2b878b-7a1d-4570-b5d2-68ebdb347a55
+                ownerId: 0fcf0a60-6320-44c7-b0d7-95557a82d46f
+                title: The Hobbit
+                author: J. R. R. Tolkien
+                isbn: "9780547928227"
+                condition: FAIR
+                photoUrl: https://storage.example.com/books/4d2b878b.jpg
+                available: false
+                createdAt: "2026-07-19T08:30:00Z"
+                updatedAt: "2026-07-20T11:15:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /books/{bookId}/photo:
+    parameters:
+      - $ref: "#/components/parameters/BookId"
+    put:
+      tags:
+        - Books
+      summary: Upload or replace a book photo
+      description: >
+        Uploads a JPEG or PNG image for a book owned by the authenticated member.
+        The file must not exceed 5 MB. The image is stored in Azure Blob Storage,
+        while only its reference is stored with the book record.
+      operationId: uploadBookPhoto
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - photo
+              properties:
+                photo:
+                  type: string
+                  format: binary
+                  description: JPEG or PNG image with a maximum size of 5 MB.
+            encoding:
+              photo:
+                contentType: image/jpeg, image/png
+      responses:
+        "200":
+          description: Existing book photo replaced successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Book"
+        "201":
+          description: Book photo uploaded successfully for the first time.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Book"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/PhotoTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedPhotoType"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /books/{bookId}/borrow-requests:
+    parameters:
+      - $ref: "#/components/parameters/BookId"
+    post:
+      tags:
+        - Borrow Requests
+      summary: Request to borrow a book
+      description: >
+        Creates a pending borrow request for an available book in the authenticated
+        member's building. The borrower is identified from the JWT. The request
+        cannot be created for the member's own book, an unavailable book, or when
+        the member already has a pending request for the same book.
+      operationId: createBorrowRequest
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBorrowRequest"
+            example:
+              message: Could I borrow this book?
+      responses:
+        "201":
+          description: Borrow request created successfully.
+          headers:
+            Location:
+              description: URL of the newly created borrow request.
+              schema:
+                type: string
+                format: uri
+              example: https://api.bookswap.local/borrow-requests/90cff1c9-43cb-494d-b071-64461472bd5e
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BorrowRequest"
+              example:
+                id: 90cff1c9-43cb-494d-b071-64461472bd5e
+                bookId: 4d2b878b-7a1d-4570-b5d2-68ebdb347a55
+                borrowerId: 0c10b2f8-d9c5-4976-a60b-298bf389d53c
+                message: Could I borrow this book?
+                status: PENDING
+                requestedAt: "2026-07-19T09:00:00Z"
+                respondedAt: null
+                loanId: null
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /books/{bookId}/loans:
+    parameters:
+      - $ref: "#/components/parameters/BookId"
+    get:
+      tags:
+        - Loans
+      summary: List loan history for a book
+      description: >
+        Returns a paginated history of current and previous loans for a book owned
+        by the authenticated member. Borrower addresses and phone numbers are never returned.
+      operationId: listBookLoans
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Loan history returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoanPage"
+              example:
+                items:
+                  - id: 2c707976-bb13-4778-a63b-f09f48d73957
+                    bookId: 4d2b878b-7a1d-4570-b5d2-68ebdb347a55
+                    borrowRequestId: 90cff1c9-43cb-494d-b071-64461472bd5e
+                    ownerId: 0fcf0a60-6320-44c7-b0d7-95557a82d46f
+                    borrowerId: 0c10b2f8-d9c5-4976-a60b-298bf389d53c
+                    status: RETURNED
+                    borrowedAt: "2026-06-01T09:00:00Z"
+                    dueAt: "2026-07-01T09:00:00Z"
+                    returnedAt: "2026-06-25T14:30:00Z"
+                page: 1
+                pageSize: 20
+                total: 1
+                totalPages: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /borrow-requests:
+    get:
+      tags:
+        - Borrow Requests
+      summary: List borrow requests
+      description: >
+        Returns a paginated list of borrow requests related to the authenticated
+        member. Requests can be viewed from the perspective of the book owner or
+        borrower and filtered by status.
+      operationId: listBorrowRequests
+      parameters:
+        - name: role
+          in: query
+          required: true
+          description: >
+            Selects requests where the authenticated member is either the book
+            owner or the borrower.
+          schema:
+            type: string
+            enum:
+              - OWNER
+              - BORROWER
+          example: OWNER
+        - name: status
+          in: query
+          required: false
+          description: Filter borrow requests by their current status.
+          schema:
+            $ref: "#/components/schemas/BorrowRequestStatus"
+          example: PENDING
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Borrow requests returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BorrowRequestPage"
+              example:
+                items:
+                  - id: 90cff1c9-43cb-494d-b071-64461472bd5e
+                    bookId: 4d2b878b-7a1d-4570-b5d2-68ebdb347a55
+                    borrowerId: 0c10b2f8-d9c5-4976-a60b-298bf389d53c
+                    message: Could I borrow this book?
+                    status: PENDING
+                    requestedAt: "2026-07-19T09:00:00Z"
+                    respondedAt: null
+                    loanId: null
+                page: 1
+                pageSize: 20
+                total: 1
+                totalPages: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /borrow-requests/{borrowRequestId}:
+    parameters:
+      - $ref: "#/components/parameters/BorrowRequestId"
+    get:
+      tags:
+        - Borrow Requests
+      summary: Get a borrow request by ID
+      description: >
+        Returns a borrow request when the authenticated member is either the
+        borrower who created it or the owner of the requested book.
+      operationId: getBorrowRequestById
+      responses:
+        "200":
+          description: Borrow request returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BorrowRequest"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    patch:
+      tags:
+        - Borrow Requests
+      summary: Accept or decline a borrow request
+      description: >
+        Allows the owner of the requested book to accept or decline a pending
+        borrow request. Accepting creates a 30-day loan, marks the book as
+        unavailable, and declines any other pending requests for the same book.
+      operationId: updateBorrowRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBorrowRequest"
+            examples:
+              acceptRequest:
+                summary: Accept the borrow request
+                value:
+                  status: ACCEPTED
+              declineRequest:
+                summary: Decline the borrow request
+                value:
+                  status: DECLINED
+      responses:
+        "200":
+          description: Borrow request updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BorrowRequest"
+              examples:
+                accepted:
+                  summary: Accepted borrow request
+                  value:
+                    id: 90cff1c9-43cb-494d-b071-64461472bd5e
+                    bookId: 4d2b878b-7a1d-4570-b5d2-68ebdb347a55
+                    borrowerId: 0c10b2f8-d9c5-4976-a60b-298bf389d53c
+                    message: Could I borrow this book?
+                    status: ACCEPTED
+                    requestedAt: "2026-07-19T09:00:00Z"
+                    respondedAt: "2026-07-19T09:15:00Z"
+                    loanId: 2c707976-bb13-4778-a63b-f09f48d73957
+                declined:
+                  summary: Declined borrow request
+                  value:
+                    id: 90cff1c9-43cb-494d-b071-64461472bd5e
+                    bookId: 4d2b878b-7a1d-4570-b5d2-68ebdb347a55
+                    borrowerId: 0c10b2f8-d9c5-4976-a60b-298bf389d53c
+                    message: Could I borrow this book?
+                    status: DECLINED
+                    requestedAt: "2026-07-19T09:00:00Z"
+                    respondedAt: "2026-07-19T09:15:00Z"
+                    loanId: null
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /loans:
+    get:
+      tags:
+        - Loans
+      summary: List loans
+      description: >
+        Returns a paginated list of loans related to the authenticated member.
+        Results can be viewed from the perspective of the book owner or borrower
+        and filtered by loan status.
+      operationId: listLoans
+      parameters:
+        - name: role
+          in: query
+          required: true
+          description: >
+            Selects loans where the authenticated member is either the book owner
+            or the borrower.
+          schema:
+            type: string
+            enum:
+              - OWNER
+              - BORROWER
+          example: BORROWER
+        - name: status
+          in: query
+          required: false
+          description: Filter loans by their current status.
+          schema:
+            $ref: "#/components/schemas/LoanStatus"
+          example: OUT
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Loans returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoanPage"
+              example:
+                items:
+                  - id: 2c707976-bb13-4778-a63b-f09f48d73957
+                    bookId: 4d2b878b-7a1d-4570-b5d2-68ebdb347a55
+                    borrowRequestId: 90cff1c9-43cb-494d-b071-64461472bd5e
+                    ownerId: 0fcf0a60-6320-44c7-b0d7-95557a82d46f
+                    borrowerId: 0c10b2f8-d9c5-4976-a60b-298bf389d53c
+                    status: OUT
+                    borrowedAt: "2026-07-19T09:15:00Z"
+                    dueAt: "2026-08-18T09:15:00Z"
+                    returnedAt: null
+                page: 1
+                pageSize: 20
+                total: 1
+                totalPages: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /loans/{loanId}:
+    parameters:
+      - $ref: "#/components/parameters/LoanId"
+    get:
+      tags:
+        - Loans
+      summary: Get a loan by ID
+      description: >
+        Returns a loan when the authenticated member is either the owner of the
+        book or the borrower.
+      operationId: getLoanById
+      responses:
+        "200":
+          description: Loan returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Loan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    patch:
+      tags:
+        - Loans
+      summary: Mark a loan as returned
+      description: >
+        Allows the book owner to mark an active or overdue loan as returned. The
+        server records the return time and makes the associated book available again.
+      operationId: markLoanReturned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLoanRequest"
+            example:
+              status: RETURNED
+      responses:
+        "200":
+          description: Loan marked as returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Loan"
+              example:
+                id: 2c707976-bb13-4778-a63b-f09f48d73957
+                bookId: 4d2b878b-7a1d-4570-b5d2-68ebdb347a55
+                borrowRequestId: 90cff1c9-43cb-494d-b071-64461472bd5e
+                ownerId: 0fcf0a60-6320-44c7-b0d7-95557a82d46f
+                borrowerId: 0c10b2f8-d9c5-4976-a60b-298bf389d53c
+                status: RETURNED
+                borrowedAt: "2026-07-19T09:15:00Z"
+                dueAt: "2026-08-18T09:15:00Z"
+                returnedAt: "2026-08-10T14:30:00Z"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /notifications:
+    get:
+      tags:
+        - Notifications
+      summary: List in-app notifications
+      description: >
+        Returns a paginated list of in-app notifications belonging to the
+        authenticated member. Results may be filtered by read state and
+        notification type.
+      operationId: listNotifications
+      parameters:
+        - name: read
+          in: query
+          required: false
+          description: Filter notifications by whether they have been read.
+          schema:
+            type: boolean
+          example: false
+        - name: type
+          in: query
+          required: false
+          description: Filter notifications by the event that created them.
+          schema:
+            $ref: "#/components/schemas/NotificationType"
+          example: BORROW_REQUEST_RECEIVED
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+      responses:
+        "200":
+          description: Notifications returned successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPage"
+              example:
+                items:
+                  - id: 6498d85a-2495-4eb5-96c1-63fcfaac7137
+                    type: BORROW_REQUEST_RECEIVED
+                    title: New borrow request
+                    message: A member has requested to borrow The Hobbit.
+                    read: false
+                    relatedResourceType: BORROW_REQUEST
+                    relatedResourceId: 90cff1c9-43cb-494d-b071-64461472bd5e
+                    createdAt: "2026-07-19T09:00:02Z"
+                    readAt: null
+                page: 1
+                pageSize: 20
+                total: 1
+                totalPages: 1
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /notifications/{notificationId}:
+    parameters:
+      - $ref: "#/components/parameters/NotificationId"
+    patch:
+      tags:
+        - Notifications
+      summary: Update a notification's read state
+      description: >
+        Updates the read state of a notification belonging to the authenticated
+        member. When marked as read, the server records the current time in readAt.
+      operationId: updateNotification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateNotificationRequest"
+            examples:
+              markAsRead:
+                summary: Mark the notification as read
+                value:
+                  read: true
+              markAsUnread:
+                summary: Mark the notification as unread
+                value:
+                  read: false
+      responses:
+        "200":
+          description: Notification updated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Notification"
+              examples:
+                readNotification:
+                  summary: Notification marked as read
+                  value:
+                    id: 6498d85a-2495-4eb5-96c1-63fcfaac7137
+                    type: BORROW_REQUEST_RECEIVED
+                    title: New borrow request
+                    message: A member has requested to borrow The Hobbit.
+                    read: true
+                    relatedResourceType: BORROW_REQUEST
+                    relatedResourceId: 90cff1c9-43cb-494d-b071-64461472bd5e
+                    createdAt: "2026-07-19T09:00:02Z"
+                    readAt: "2026-07-19T09:10:00Z"
+                unreadNotification:
+                  summary: Notification marked as unread
+                  value:
+                    id: 6498d85a-2495-4eb5-96c1-63fcfaac7137
+                    type: BORROW_REQUEST_RECEIVED
+                    title: New borrow request
+                    message: A member has requested to borrow The Hobbit.
+                    read: false
+                    relatedResourceType: BORROW_REQUEST
+                    relatedResourceId: 90cff1c9-43cb-494d-b071-64461472bd5e
+                    createdAt: "2026-07-19T09:00:02Z"
+                    readAt: null
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >
+        Microsoft Entra External ID access token supplied using the
+        Authorization: Bearer <token> header.
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Page number to return.
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      description: Number of records to return per page.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    BookId:
+      name: bookId
+      in: path
+      required: true
+      description: Unique opaque identifier of the book.
+      schema:
+        type: string
+        minLength: 1
+    BorrowRequestId:
+      name: borrowRequestId
+      in: path
+      required: true
+      description: Unique opaque identifier of the borrow request.
+      schema:
+        type: string
+        minLength: 1
+    LoanId:
+      name: loanId
+      in: path
+      required: true
+      description: Unique opaque identifier of the loan.
+      schema:
+        type: string
+        minLength: 1
+    NotificationId:
+      name: notificationId
+      in: path
+      required: true
+      description: Unique opaque identifier of the notification.
+      schema:
+        type: string
+        minLength: 1
+
+  responses:
+    BadRequest:
+      description: The request is malformed or contains invalid path or query parameters.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: BAD_REQUEST
+            message: The request could not be understood.
+            requestId: a54cf104-8275-4107-92fd-ef96f3eb2ea3
+    Unauthorized:
+      description: The access token is missing, invalid, or expired.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: UNAUTHORIZED
+            message: A valid access token is required.
+            requestId: a54cf104-8275-4107-92fd-ef96f3eb2ea3
+    Forbidden:
+      description: The authenticated member is not allowed to perform this action.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: FORBIDDEN
+            message: You do not have permission to perform this action.
+            requestId: a54cf104-8275-4107-92fd-ef96f3eb2ea3
+    NotFound:
+      description: The requested resource was not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: RESOURCE_NOT_FOUND
+            message: The requested resource was not found.
+            requestId: a54cf104-8275-4107-92fd-ef96f3eb2ea3
+    Conflict:
+      description: The request conflicts with the current state of the resource.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: RESOURCE_CONFLICT
+            message: The request conflicts with the current resource state.
+            requestId: a54cf104-8275-4107-92fd-ef96f3eb2ea3
+    ValidationError:
+      description: The request body is valid JSON but contains missing or invalid values.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: VALIDATION_ERROR
+            message: The request contains invalid fields.
+            requestId: a54cf104-8275-4107-92fd-ef96f3eb2ea3
+            details:
+              - field: title
+                message: Title is required.
+    PhotoTooLarge:
+      description: The uploaded photo exceeds the 5 MB size limit.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: PHOTO_TOO_LARGE
+            message: The uploaded photo must not exceed 5 MB.
+            requestId: a54cf104-8275-4107-92fd-ef96f3eb2ea3
+    UnsupportedPhotoType:
+      description: The uploaded file is not a supported image type.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: UNSUPPORTED_PHOTO_TYPE
+            message: Only JPEG and PNG images are supported.
+            requestId: a54cf104-8275-4107-92fd-ef96f3eb2ea3
+    InternalServerError:
+      description: An unexpected server error occurred.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: INTERNAL_SERVER_ERROR
+            message: An unexpected error occurred.
+            requestId: a54cf104-8275-4107-92fd-ef96f3eb2ea3
+
+  schemas:
+    BookCondition:
+      type: string
+      description: Physical condition of a listed book.
+      enum:
+        - NEW
+        - LIKE_NEW
+        - GOOD
+        - FAIR
+        - POOR
+
+    BorrowRequestStatus:
+      type: string
+      description: Current state of a request to borrow a book.
+      enum:
+        - PENDING
+        - ACCEPTED
+        - DECLINED
+
+    LoanStatus:
+      type: string
+      description: Current state of a book loan.
+      enum:
+        - OUT
+        - OVERDUE
+        - RETURNED
+
+    NotificationType:
+      type: string
+      description: Event that caused an in-app notification.
+      enum:
+        - BORROW_REQUEST_RECEIVED
+        - BORROW_REQUEST_ACCEPTED
+        - BORROW_REQUEST_DECLINED
+        - LOAN_OVERDUE
+        - LOAN_RETURNED
+
+    RelatedResourceType:
+      type: string
+      description: Type of resource related to a notification.
+      enum:
+        - BOOK
+        - BORROW_REQUEST
+        - LOAN
+
+    Book:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - ownerId
+        - title
+        - author
+        - condition
+        - available
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          readOnly: true
+          description: Unique identifier of the book.
+        ownerId:
+          type: string
+          readOnly: true
+          description: Identifier of the member who owns the book.
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Title of the book.
+        author:
+          type: string
+          minLength: 1
+          maxLength: 150
+          description: Author of the book.
+        isbn:
+          type:
+            - string
+            - "null"
+          maxLength: 20
+          description: Optional ISBN-10 or ISBN-13.
+        condition:
+          $ref: "#/components/schemas/BookCondition"
+        photoUrl:
+          type:
+            - string
+            - "null"
+          format: uri
+          readOnly: true
+          description: URL of the photo stored in Azure Blob Storage.
+        available:
+          type: boolean
+          default: true
+          description: Whether the book is currently available to request.
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Date and time when the listing was created.
+        updatedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Date and time when the listing was last updated.
+
+    BorrowRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - bookId
+        - borrowerId
+        - status
+        - requestedAt
+      properties:
+        id:
+          type: string
+          readOnly: true
+          description: Unique identifier of the borrow request.
+        bookId:
+          type: string
+          readOnly: true
+          description: Identifier of the requested book.
+        borrowerId:
+          type: string
+          readOnly: true
+          description: Identifier of the requesting member.
+        message:
+          type:
+            - string
+            - "null"
+          maxLength: 500
+          description: Optional message from the borrower to the owner.
+        status:
+          allOf:
+            - $ref: "#/components/schemas/BorrowRequestStatus"
+          readOnly: true
+        requestedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Date and time when the request was created.
+        respondedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          readOnly: true
+          description: Date and time when the owner accepted or declined the request.
+        loanId:
+          type:
+            - string
+            - "null"
+          readOnly: true
+          description: Loan created when the request is accepted.
+
+    Loan:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - bookId
+        - borrowRequestId
+        - ownerId
+        - borrowerId
+        - status
+        - borrowedAt
+        - dueAt
+      properties:
+        id:
+          type: string
+          readOnly: true
+          description: Unique identifier of the loan.
+        bookId:
+          type: string
+          readOnly: true
+          description: Identifier of the borrowed book.
+        borrowRequestId:
+          type: string
+          readOnly: true
+          description: Borrow request from which the loan was created.
+        ownerId:
+          type: string
+          readOnly: true
+          description: Identifier of the member lending the book.
+        borrowerId:
+          type: string
+          readOnly: true
+          description: Identifier of the member borrowing the book.
+        status:
+          allOf:
+            - $ref: "#/components/schemas/LoanStatus"
+          readOnly: true
+        borrowedAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Date and time when the 30-day loan started.
+        dueAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Date and time after which the loan becomes overdue.
+        returnedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          readOnly: true
+          description: Date and time when the book was returned.
+
+    Notification:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - type
+        - title
+        - message
+        - read
+        - createdAt
+      properties:
+        id:
+          type: string
+          readOnly: true
+          description: Unique identifier of the notification.
+        type:
+          allOf:
+            - $ref: "#/components/schemas/NotificationType"
+          readOnly: true
+        title:
+          type: string
+          maxLength: 100
+          readOnly: true
+          description: Short notification heading.
+        message:
+          type: string
+          maxLength: 500
+          readOnly: true
+          description: Message displayed to the member.
+        read:
+          type: boolean
+          default: false
+          description: Whether the member has read the notification.
+        relatedResourceType:
+          anyOf:
+            - $ref: "#/components/schemas/RelatedResourceType"
+            - type: "null"
+          readOnly: true
+          description: Type of resource associated with the notification.
+        relatedResourceId:
+          type:
+            - string
+            - "null"
+          readOnly: true
+          description: Identifier of the associated resource.
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Date and time when the notification was created.
+        readAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          readOnly: true
+          description: Date and time when the notification was marked as read.
+
+    CreateBookRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - title
+        - author
+        - condition
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Title of the book.
+        author:
+          type: string
+          minLength: 1
+          maxLength: 150
+          description: Author of the book.
+        isbn:
+          type:
+            - string
+            - "null"
+          maxLength: 20
+          description: Optional ISBN-10 or ISBN-13.
+        condition:
+          $ref: "#/components/schemas/BookCondition"
+        available:
+          type: boolean
+          default: true
+          description: Whether the book is initially available to borrow.
+
+    UpdateBookRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        author:
+          type: string
+          minLength: 1
+          maxLength: 150
+        isbn:
+          type:
+            - string
+            - "null"
+          maxLength: 20
+        condition:
+          $ref: "#/components/schemas/BookCondition"
+        available:
+          type: boolean
+
+    CreateBorrowRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        message:
+          type:
+            - string
+            - "null"
+          maxLength: 500
+          description: Optional message from the borrower to the book owner.
+
+    UpdateBorrowRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ACCEPTED
+            - DECLINED
+          description: Decision made by the book owner.
+
+    UpdateLoanRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - RETURNED
+          description: Marks the loan as returned.
+
+    UpdateNotificationRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - read
+      properties:
+        read:
+          type: boolean
+          description: Whether the notification has been read.
+
+    Page:
+      type: object
+      required:
+        - page
+        - pageSize
+        - total
+        - totalPages
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          description: Current page number.
+        pageSize:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Maximum number of items returned per page.
+        total:
+          type: integer
+          minimum: 0
+          description: Total number of matching records.
+        totalPages:
+          type: integer
+          minimum: 0
+          description: Total number of pages.
+
+    BookPage:
+      allOf:
+        - $ref: "#/components/schemas/Page"
+        - type: object
+          required:
+            - items
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/Book"
+
+    BorrowRequestPage:
+      allOf:
+        - $ref: "#/components/schemas/Page"
+        - type: object
+          required:
+            - items
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/BorrowRequest"
+
+    LoanPage:
+      allOf:
+        - $ref: "#/components/schemas/Page"
+        - type: object
+          required:
+            - items
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/Loan"
+
+    NotificationPage:
+      allOf:
+        - $ref: "#/components/schemas/Page"
+        - type: object
+          required:
+            - items
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/Notification"
+
+    ValidationErrorDetail:
+      type: object
+      additionalProperties: false
+      required:
+        - field
+        - message
+      properties:
+        field:
+          type: string
+          example: title
+        message:
+          type: string
+          example: Title is required.
+
+    Error:
+      type: object
+      additionalProperties: false
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code.
+          example: BOOK_NOT_FOUND
+        message:
+          type: string
+          description: Human-readable explanation of the error.
+          example: The requested book was not found.
+        requestId:
+          type:
+            - string
+            - "null"
+          format: uuid
+          description: Identifier used to trace the request in logs.
+        details:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValidationErrorDetail"

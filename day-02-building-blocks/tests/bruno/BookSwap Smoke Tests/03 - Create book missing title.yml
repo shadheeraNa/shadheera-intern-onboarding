@@ -1,0 +1,35 @@
+info:
+  name: 03 - Create book missing title
+  type: http
+  seq: 4
+
+http:
+  method: POST
+  url: http://127.0.0.1:4010/books
+  headers:
+    - name: Authorization
+      value: Bearer test-token
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "author": "Robert C. Martin",
+        "isbn": "9780132350884",
+        "condition": "GOOD",
+        "available": true
+      }
+  auth: inherit
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "422"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5

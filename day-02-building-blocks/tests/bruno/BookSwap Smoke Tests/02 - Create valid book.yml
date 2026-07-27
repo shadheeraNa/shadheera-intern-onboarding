@@ -1,0 +1,36 @@
+info:
+  name: 02 - Create valid book
+  type: http
+  seq: 3
+
+http:
+  method: POST
+  url: http://127.0.0.1:4010/books
+  headers:
+    - name: Authorization
+      value: Bearer test-token
+    - name: Content-Type
+      value: application/json
+  body:
+    type: json
+    data: |-
+      {
+        "title": "Clean Code",
+        "author": "Robert C. Martin",
+        "isbn": "9780132350884",
+        "condition": "GOOD",
+        "available": true
+      }
+  auth: inherit
+
+runtime:
+  assertions:
+    - expression: res.status
+      operator: eq
+      value: "201"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
