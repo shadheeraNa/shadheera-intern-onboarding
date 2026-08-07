@@ -1,0 +1,109 @@
+# BookSwap — Alert definitions
+# Companion to observability/plan.md. Each alert protects one SLO from the SLO map.
+# Guardrail alerts (duplicate_listing, cross_member_exposure, auth_bypass) fire on the
+# first occurrence (threshold >= 1), because a single event is already an incident.
+
+defaults:
+  notification_channels:
+    pager: oncall-pager
+    teams: bookswap-ops-teams
+    security: security-incident-channel
+
+alerts:
+  - name: search_latency_slo_burn
+    slo: 1
+    description: Search p95 latency exceeds 800 ms, or the 28-day budget is burning fast.
+    signal: requests (GET /books) p95 duration
+    condition: p95(duration) > 800ms for 5m OR fast_burn(28d_budget) < 1h
+    severity: Sev2
+    notify: [pager, teams]
+    runbook: reliability/runbook.md#failure-3-sunday-tabloid-spike-10x-sustained-traffic
+
+  - name: search_availability
+    slo: 2
+    description: Search returns server errors, meaning the SQL fallback is not holding when the cache fails.
+    signal: requests (GET /books) 5xx rate
+    condition: rate(5xx) > 0.5% for 5m
+    severity: Sev2
+    notify: [pager, teams]
+    runbook: reliability/runbook.md#failure-2-azure-cache-for-redis-is-down
+
+  - name: listing_creation_failure
+    slo: 3
+    description: Listing creation failing above the 0.1% error budget.
+    signal: requests (POST /books) 5xx rate
+    condition: rate(5xx) > 0.1% for 10m
+    severity: Sev2
+    notify: [pager, teams]
+    runbook: reliability/runbook.md#failure-1-azure-sql-primary-unavailable-for-5-minutes
+
+  - name: duplicate_listing_detected
+    slo: 3b
+    guardrail: true
+    description: Idempotency protection failed; a retry created a duplicate listing.
+    signal: book.created events grouped by (memberId, Idempotency-Key)
+    condition: count(key -> rows) > 1, threshold >= 1
+    severity: Sev1
+    notify: [pager]
+    runbook: reliability/runbook.md#failure-1-azure-sql-primary-unavailable-for-5-minutes
+
+  - name: notification_delivery_slow
+    slo: 4
+    description: In-app notifications exceeding the 2 s target.
+    signal: customMetrics notification.deliveryLatencyMs p95
+    condition: p95(value) > 2000ms for 15m
+    severity: Sev3
+    notify: [teams]
+    runbook: reliability/runbook.md#failure-3-sunday-tabloid-spike-10x-sustained-traffic
+
+  - name: cross_member_data_exposure
+    slo: 5
+    guardrail: true
+    description: A member received another member's private data (BOLA). Privacy breach.
+    signal: authz.violation custom event count
+    condition: count >= 1
+    severity: Sev1
+    notify: [pager, security]
+    runbook: security/review.md   # Authz, Section 2
+
+  - name: photo_upload_failure
+    slo: 6
+    description: Valid photo uploads failing.
+    signal: requests (PUT /books/{id}/photo) 5xx rate
+    condition: rate(5xx) > 1% for 15m
+    severity: Sev3
+    notify: [teams]
+    runbook: null   # no matching section; runbook scoped to 3 failures per brief (Blob Storage not among them)
+
+  - name: authentication_bypass
+    slo: 7
+    guardrail: true
+    description: A protected endpoint returned 2xx without a valid JWT. Auth is broken.
+    signal: auth.result custom event (2xx on protected route, no valid token)
+    condition: count >= 1
+    severity: Sev1
+    notify: [pager, security]
+    runbook: security/review.md   # Authn, Section 1
+
+  - name: listings_endpoint_outage
+    slo: 8
+    description: Listings endpoint fully down; detection must page within 3 minutes.
+    signal: requests (GET /books) availability
+    condition: no 2xx responses for 3m
+    severity: Sev1
+    notify: [pager]
+    runbook: reliability/runbook.md#failure-1-azure-sql-primary-unavailable-for-5-minutes
+
+  - name: audit_log_incomplete
+    slo: 9
+    description: Audit events missing requestId or memberId; audit trail is incomplete.
+    signal: audit completeness (traces reconciliation)
+    condition: completeness_pct < 100 over 1h
+    severity: Sev3
+    notify: [teams]
+    runbook: security/review.md   # PII, Section 7
+
+# Deliberately NOT alerted on (see plan.md):
+#   - weekly email digest lag / digest queue backlog (best-effort, no SLO)
+#   - individual 4xx responses (correct rejections, not failures)
+#   - Redis cache hit rate (fallback covers it; latency alert catches the real symptom)
